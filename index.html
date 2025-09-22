@@ -493,8 +493,30 @@
                 }
                 const row = document.createElement('tr');
                 row.classList.add(`color-group-${colorIndex + 1}`);
+                
                 let cells = '';
-                headers.forEach(header => { cells += `<td>${escapeHtml(item[header])}</td>`; });
+                headers.forEach(header => {
+                    let cellValue = item[header] || '';
+                    // Check if the value is a full ISO timestamp string (e.g., "2025-01-02T18:30:00.000Z")
+                    const isIsoDate = typeof cellValue === 'string' && cellValue.includes('T') && cellValue.endsWith('Z');
+
+                    if (isIsoDate) {
+                        const date = new Date(cellValue);
+                        if (!isNaN(date)) { // Check if the created date is valid
+                            if (header === dateMonthColumn) {
+                                // For the 'date_month' column, format as "DD MonthName"
+                                const day = String(date.getUTCDate()).padStart(2, '0');
+                                const monthName = date.toLocaleString('en-US', { month: 'long', timeZone: 'UTC' });
+                                cellValue = `${day} ${monthName}`;
+                            } else if (specialInputTypes[header] === 'date') {
+                                // For other date columns, format as "Month Day, Year"
+                                cellValue = date.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+                            }
+                        }
+                    }
+                    cells += `<td>${escapeHtml(cellValue)}</td>`;
+                });
+
                 row.innerHTML = cells + `
                     <td class="actions">
                         <button class="edit-btn" title="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path fill="#f39c12" d="M19.769 9.923l-12.642 12.639-7.127 1.438 1.438-7.127 12.641-12.64 5.69 5.691zm1.414-1.414l2.817-2.817-5.69-5.69-2.816 2.817 5.689 5.69z"/></svg></button>
@@ -574,11 +596,7 @@
                     const formattedValue = (inputType === 'date' && value) ? parseSheetDate(value) : value;
                     fieldHTML = `<div data-field-name="${header}"><label>${header}</label><input type="${inputType}" name="${header}" value="${escapeHtml(formattedValue)}" ${isRequired ? 'required' : ''}></div>`;
                 } else if (header === dateMonthColumn) {
-                    let [currentDay, currentMonth] = value ? value.split(' ') : ['01', 'January'];
-                    currentDay = parseInt(currentDay, 10);
-                    let daysOptions = ''; for (let i = 1; i <= 31; i++) daysOptions += `<option value="${i}" ${i === currentDay ? 'selected' : ''}>${String(i).padStart(2, '0')}</option>`;
-                    const monthsOptions = Object.keys(monthMap).map(m => `<option value="${m}" ${m === currentMonth ? 'selected' : ''}>${m}</option>`).join('');
-                    fieldHTML = `<div data-field-name="date_month"><label>date_month</label><div class="day-month-picker"><select id="date_month-day-picker">${daysOptions}</select><select id="date_month-month-picker">${monthsOptions}</select></div></div>`;
+                    fieldHTML = `<div data-field-name="${header}"><label>${header}</label><input type="text" name="${header}" value="${escapeHtml(value)}" placeholder="e.g., 03 January" ${isRequired ? 'required' : ''}></div>`;
                 } else if (header === durationDaysColumn) {
                     let optionsHTML = ''; for (let i = 0; i <= 10; i++) { const dayValue = `${i} Day${i !== 1 ? 's' : ''}`; optionsHTML += `<option value="${dayValue}" ${value === dayValue ? 'selected' : ''}>${dayValue}</option>`;}
                     fieldHTML = `<div data-field-name="duration_days"><label>duration_days</label><select name="duration_days">${optionsHTML}</select></div>`;
@@ -637,7 +655,6 @@
             // --- SEQUENTIAL UPDATE LOGIC for existing records ---
             if (isUpdating) {
                 const tempFormData = new FormData(dataForm);
-                if (document.getElementById('date_month-day-picker')) { tempFormData.set('date_month', `${String(document.getElementById('date_month-day-picker').value).padStart(2, '0')} ${document.getElementById('date_month-month-picker').value}`); }
                 if (document.getElementById('duration_hours-h-picker')) { tempFormData.set('duration_hours', `${document.getElementById('duration_hours-h-picker').value}h ${document.getElementById('duration_hours-m-picker').value}m`);}
                 for (const header in specialInputTypes) { if (specialInputTypes[header] === 'date' && tempFormData.has(header) && tempFormData.get(header)) { tempFormData.set(header, formatForSheet(tempFormData.get(header))); } }
                 
@@ -694,7 +711,6 @@
             } else {
                 saveBtn.innerHTML = '<div class="btn-loader"></div>';
                 const formData = new FormData(dataForm);
-                if (document.getElementById('date_month-day-picker')) { formData.set('date_month', `${String(document.getElementById('date_month-day-picker').value).padStart(2, '0')} ${document.getElementById('date_month-month-picker').value}`); }
                 if (document.getElementById('duration_hours-h-picker')) { formData.set('duration_hours', `${document.getElementById('duration_hours-h-picker').value}h ${document.getElementById('duration_hours-m-picker').value}m`);}
                 for (const header in specialInputTypes) { if (specialInputTypes[header] === 'date' && formData.has(header) && formData.get(header)) { formData.set(header, formatForSheet(formData.get(header))); } }
                 formData.append('action', 'create');
@@ -809,3 +825,4 @@
     </script>
 </body>
 </html>
+
