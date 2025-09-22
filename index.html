@@ -184,6 +184,12 @@
         tr.color-group-1:hover, tr.color-group-1:hover td.actions { background-color: color-mix(in srgb, var(--text-color) 5%, var(--card-background)); }
         tr.color-group-2:hover, tr.color-group-2:hover td.actions { background-color: color-mix(in srgb, var(--primary-color) 15%, var(--card-background)); }
         
+        /* Style for row update animation */
+        tr.row-updating td {
+             background-color: color-mix(in srgb, var(--secondary-color) 30%, var(--card-background)) !important;
+             transition: background-color 0.4s ease-out;
+        }
+        
         .actions button {
             border: none;
             background: none;
@@ -244,6 +250,16 @@
         
         /* Improved Button Loader */
         .btn-loader { border: 2px solid rgba(255, 255, 255, 0.4); border-top: 2px solid #ffffff; border-radius: 50%; width: 18px; height: 18px; animation: spin 1s linear infinite; position: absolute; top: 50%; left: 50%; margin-top: -9px; margin-left: -9px; }
+        
+        /* New Cell Loader for update animation */
+        .cell-loader {
+            border: 2px solid color-mix(in srgb, var(--primary-color) 20%, transparent);
+            border-top: 2px solid var(--primary-color);
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 0.8s linear infinite;
+        }
 
     </style>
 </head>
@@ -337,7 +353,7 @@
     </div>
 
     <script>
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwe4NdnSrLuHv4qN761N1ebPQ7_nlRT-hBbwTKQkGvb7bM0cKoT4wePMwYuVDswzDBI/exec';
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyeZLK5i1x9QsQHvGf_Jja6bxSIYtUJ3uXMRFPNRzzgebsKWSGFmDMs_KTi5lVxFRyv/exec';
 
         // --- Get All Elements ---
         const tableHead = document.getElementById('data-table-head');
@@ -417,22 +433,6 @@
             if (error.message.includes('Failed to fetch')) {
                 title = 'Connection Error';
                 message = `The request to the server failed. This is almost always caused by an incorrect or outdated Web App URL.\n\nPlease follow these steps:\n1. Open your Google Apps Script.\n2. Click "Deploy" > "New deployment".\n3. Set "Who has access" to "Anyone".\n4. Copy the new Web App URL.\n5. Paste the new URL into the WEB_APP_URL variable in this HTML file.`;
-            } else if (error.message.includes('Invalid action specified')) {
-                title = 'Backend Script Outdated';
-                message = `The update failed because your Google Apps Script is missing the required code to handle one-by-one field updates.\n\nPlease update your 'doPost(e)' function in Google Apps Script by adding this code block:\n\n` +
-                          `} else if (e.parameter.action === 'updateField') {\n` +
-                          `  const rowIndex = parseInt(e.parameter.rowIndex, 10);\n` +
-                          `  const fieldName = e.parameter.fieldName;\n` +
-                          `  const fieldValue = e.parameter.fieldValue;\n` +
-                          `  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];\n` +
-                          `  const colIndex = headers.indexOf(fieldName) + 1;\n` +
-                          `  if (colIndex > 0 && rowIndex > 1) {\n` +
-                          `    sheet.getRange(rowIndex, colIndex).setValue(fieldValue);\n` +
-                          `    return ContentService.createTextOutput(JSON.stringify({ status: 'SUCCESS', message: \`Updated \${fieldName}\` })).setMimeType(ContentService.MimeType.JSON);\n` +
-                          `  } else {\n` +
-                          `    return ContentService.createTextOutput(JSON.stringify({ status: 'ERROR', message: 'Field not found or invalid row' })).setMimeType(ContentService.MimeType.JSON);\n` +
-                          `  }\n` +
-                          `}`;
             } else {
                 message = `An unexpected error occurred: ${error.message}`;
             }
@@ -492,43 +492,31 @@
                     lastDate = currentDate;
                 }
                 const row = document.createElement('tr');
+                row.dataset.rowIndex = item.rowIndex; // IMPORTANT: Add identifier to row
                 row.classList.add(`color-group-${colorIndex + 1}`);
-                
                 let cells = '';
-                headers.forEach(header => {
-                    let cellValue = item[header] || '';
-                    // Check if the value is a full ISO timestamp string (e.g., "2025-01-02T18:30:00.000Z")
-                    const isIsoDate = typeof cellValue === 'string' && cellValue.includes('T') && cellValue.endsWith('Z');
+                headers.forEach(header => { cells += `<td>${escapeHtml(item[header])}</td>`; });
+                row.innerHTML = cells;
+                
+                const actionsCell = row.insertCell();
+                actionsCell.className = 'actions';
+                populateActions(actionsCell, item);
 
-                    if (isIsoDate) {
-                        const date = new Date(cellValue);
-                        if (!isNaN(date)) { // Check if the created date is valid
-                            if (header === dateMonthColumn) {
-                                // For the 'date_month' column, format as "DD MonthName"
-                                const day = String(date.getUTCDate()).padStart(2, '0');
-                                const monthName = date.toLocaleString('en-US', { month: 'long', timeZone: 'UTC' });
-                                cellValue = `${day} ${monthName}`;
-                            } else if (specialInputTypes[header] === 'date') {
-                                // For other date columns, format as "Month Day, Year"
-                                cellValue = date.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
-                            }
-                        }
-                    }
-                    cells += `<td>${escapeHtml(cellValue)}</td>`;
-                });
-
-                row.innerHTML = cells + `
-                    <td class="actions">
-                        <button class="edit-btn" title="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path fill="#f39c12" d="M19.769 9.923l-12.642 12.639-7.127 1.438 1.438-7.127 12.641-12.64 5.69 5.691zm1.414-1.414l2.817-2.817-5.69-5.69-2.816 2.817 5.689 5.69z"/></svg></button>
-                        <button class="duplicate-btn" title="Duplicate"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path fill="var(--info-color)" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></button>
-                        <button class="delete-btn" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path fill="var(--danger-color)" d="M24 20.188l-8.315-8.209 8.2-8.282-3.697-3.697-8.212 8.318-8.31-8.203-3.666 3.666 8.321 8.24-8.206 8.313 3.666 3.666 8.237-8.318 8.285 8.203z"/></svg></button>
-                    </td>`;
-                row.querySelector('.edit-btn').addEventListener('click', () => openModal(item));
-                row.querySelector('.duplicate-btn').addEventListener('click', () => showDuplicateConfirm(item.rowIndex));
-                row.querySelector('.delete-btn').addEventListener('click', () => showDeleteConfirm(item.rowIndex));
                 tableBody.appendChild(row);
             });
         }
+        
+        function populateActions(cell, record) {
+            cell.innerHTML = `
+                <button class="edit-btn" title="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path fill="#f39c12" d="M19.769 9.923l-12.642 12.639-7.127 1.438 1.438-7.127 12.641-12.64 5.69 5.691zm1.414-1.414l2.817-2.817-5.69-5.69-2.816 2.817 5.689 5.69z"/></svg></button>
+                <button class="duplicate-btn" title="Duplicate"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path fill="var(--info-color)" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></button>
+                <button class="delete-btn" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path fill="var(--danger-color)" d="M24 20.188l-8.315-8.209 8.2-8.282-3.697-3.697-8.212 8.318-8.31-8.203-3.666 3.666 8.321 8.24-8.206 8.313 3.666 3.666 8.237-8.318 8.285 8.203z"/></svg></button>
+            `;
+            cell.querySelector('.edit-btn').addEventListener('click', () => openModal(record));
+            cell.querySelector('.duplicate-btn').addEventListener('click', () => showDuplicateConfirm(record.rowIndex));
+            cell.querySelector('.delete-btn').addEventListener('click', () => showDeleteConfirm(record.rowIndex));
+        }
+
 
         function populateFilters(records) {
             const uniqueYears = [...new Set(records.map(record => record.year).filter(Boolean))].sort((a,b) => b - a);
@@ -596,7 +584,11 @@
                     const formattedValue = (inputType === 'date' && value) ? parseSheetDate(value) : value;
                     fieldHTML = `<div data-field-name="${header}"><label>${header}</label><input type="${inputType}" name="${header}" value="${escapeHtml(formattedValue)}" ${isRequired ? 'required' : ''}></div>`;
                 } else if (header === dateMonthColumn) {
-                    fieldHTML = `<div data-field-name="${header}"><label>${header}</label><input type="text" name="${header}" value="${escapeHtml(value)}" placeholder="e.g., 03 January" ${isRequired ? 'required' : ''}></div>`;
+                    let [currentDay, currentMonth] = value ? value.split(' ') : ['01', 'January'];
+                    currentDay = parseInt(currentDay, 10);
+                    let daysOptions = ''; for (let i = 1; i <= 31; i++) daysOptions += `<option value="${i}" ${i === currentDay ? 'selected' : ''}>${String(i).padStart(2, '0')}</option>`;
+                    const monthsOptions = Object.keys(monthMap).map(m => `<option value="${m}" ${m === currentMonth ? 'selected' : ''}>${m}</option>`).join('');
+                    fieldHTML = `<div data-field-name="date_month"><label>date_month</label><div class="day-month-picker"><select id="date_month-day-picker">${daysOptions}</select><select id="date_month-month-picker">${monthsOptions}</select></div></div>`;
                 } else if (header === durationDaysColumn) {
                     let optionsHTML = ''; for (let i = 0; i <= 10; i++) { const dayValue = `${i} Day${i !== 1 ? 's' : ''}`; optionsHTML += `<option value="${dayValue}" ${value === dayValue ? 'selected' : ''}>${dayValue}</option>`;}
                     fieldHTML = `<div data-field-name="duration_days"><label>duration_days</label><select name="duration_days">${optionsHTML}</select></div>`;
@@ -621,117 +613,125 @@
             dataModal.style.display = 'block';
         }
 
-        /*
-        * IMPORTANT GOOGLE APPS SCRIPT CHANGE:
-        * To make the new one-by-one update method work, you must add the following
-        * 'else if' block to the `doPost(e)` function in your Google Apps Script file.
-        *
-        * } else if (e.parameter.action === 'updateField') {
-        * const rowIndex = parseInt(e.parameter.rowIndex, 10);
-        * const fieldName = e.parameter.fieldName;
-        * const fieldValue = e.parameter.fieldValue;
-        * * const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-        * const colIndex = headers.indexOf(fieldName) + 1;
-        * * if (colIndex > 0 && rowIndex > 1) {
-        * sheet.getRange(rowIndex, colIndex).setValue(fieldValue);
-        * return ContentService.createTextOutput(JSON.stringify({ status: 'SUCCESS', message: `Updated ${fieldName}` })).setMimeType(ContentService.MimeType.JSON);
-        * } else {
-        * return ContentService.createTextOutput(JSON.stringify({ status: 'ERROR', message: 'Field not found or invalid row' })).setMimeType(ContentService.MimeType.JSON);
-        * }
-        * }
-        *
-        */
         async function handleFormSubmit(event) {
             event.preventDefault();
-            if (!dataForm.checkValidity()) {
-                dataForm.reportValidity();
-                return;
-            }
-
+            if (!dataForm.checkValidity()) { dataForm.reportValidity(); return; }
             saveBtn.disabled = true;
             const originalButtonContent = saveBtn.innerHTML;
-            const isUpdating = !!rowIndexInput.value;
+            saveBtn.innerHTML = '<div class="btn-loader"></div>';
 
-            // --- SEQUENTIAL UPDATE LOGIC for existing records ---
-            if (isUpdating) {
-                const tempFormData = new FormData(dataForm);
-                if (document.getElementById('duration_hours-h-picker')) { tempFormData.set('duration_hours', `${document.getElementById('duration_hours-h-picker').value}h ${document.getElementById('duration_hours-m-picker').value}m`);}
-                for (const header in specialInputTypes) { if (specialInputTypes[header] === 'date' && tempFormData.has(header) && tempFormData.get(header)) { tempFormData.set(header, formatForSheet(tempFormData.get(header))); } }
+            const formData = new FormData(dataForm);
+            if (document.getElementById('date_month-day-picker')) { formData.set('date_month', `${String(document.getElementById('date_month-day-picker').value).padStart(2, '0')} ${document.getElementById('date_month-month-picker').value}`); }
+            if (document.getElementById('duration_hours-h-picker')) { formData.set('duration_hours', `${document.getElementById('duration_hours-h-picker').value}h ${document.getElementById('duration_hours-m-picker').value}m`);}
+            for (const header in specialInputTypes) { if (specialInputTypes[header] === 'date' && formData.has(header) && formData.get(header)) { formData.set(header, formatForSheet(formData.get(header))); } }
+            
+            const action = rowIndexInput.value ? 'update' : 'create';
+            formData.append('action', action);
+            const oldRowIndexes = action === 'create' ? new Set(allRecords.map(r => r.rowIndex)) : null;
+
+            try {
+                const response = await fetch(WEB_APP_URL, { method: 'POST', body: formData, mode: 'cors' });
+                if (!response.ok) throw new Error(`Server error (${response.status})`);
+                const result = await response.json();
+                if (result.status !== 'SUCCESS') throw new Error(result.message);
                 
-                const fieldsToUpdate = [];
-                const originalRecord = allRecords.find(r => r.rowIndex == rowIndexInput.value);
+                dataModal.style.display = 'none';
 
-                for (const [key, value] of tempFormData.entries()) {
-                    if (key === 'rowIndex') continue;
-                    // Only add to the update list if the value has actually changed
-                    if (!originalRecord || String(originalRecord[key] || '') !== String(value)) {
-                        fieldsToUpdate.push({ name: key, value: value });
-                    }
+                let targetRecord;
+                if (action === 'update') {
+                    targetRecord = result.rows.find(r => r.rowIndex == rowIndexInput.value);
+                } else { // create
+                    targetRecord = result.rows.find(r => !oldRowIndexes.has(r.rowIndex));
                 }
 
-                if (fieldsToUpdate.length === 0) {
-                    showInfo("No Changes", "You haven't made any changes to the record.");
-                    saveBtn.disabled = false;
+                if (targetRecord) {
+                    await animateRowUpdate(targetRecord, action);
+                } else {
+                    // Fallback to full refresh if something went wrong
+                    processDataPayload(result);
                     return;
                 }
 
-                cancelBtn.disabled = true;
-
-                try {
-                    for (let i = 0; i < fieldsToUpdate.length; i++) {
-                        const field = fieldsToUpdate[i];
-                        saveBtn.textContent = `Updating ${i + 1}/${fieldsToUpdate.length}: ${field.name}`;
-                        
-                        const fieldUpdateData = new FormData();
-                        fieldUpdateData.append('action', 'updateField');
-                        fieldUpdateData.append('rowIndex', rowIndexInput.value);
-                        fieldUpdateData.append('fieldName', field.name);
-                        fieldUpdateData.append('fieldValue', field.value);
-
-                        const response = await fetch(WEB_APP_URL, { method: 'POST', body: fieldUpdateData, mode: 'cors' });
-                        if (!response.ok) throw new Error(`Server error (${response.status}) for ${field.name}`);
-                        const result = await response.json();
-                        if (result.status !== 'SUCCESS') throw new Error(result.message || `Failed to update ${field.name}`);
-                    }
-
-                    saveBtn.textContent = 'Success!';
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                    dataModal.style.display = 'none';
-                    await fetchData();
-
-                } catch (error) {
-                    handleFetchError(error, 'Update');
-                } finally {
-                    saveBtn.disabled = false;
-                    saveBtn.innerHTML = originalButtonContent;
-                    cancelBtn.disabled = false;
-                }
-            
-            // --- SINGLE SUBMISSION LOGIC for new records ---
-            } else {
-                saveBtn.innerHTML = '<div class="btn-loader"></div>';
-                const formData = new FormData(dataForm);
-                if (document.getElementById('duration_hours-h-picker')) { formData.set('duration_hours', `${document.getElementById('duration_hours-h-picker').value}h ${document.getElementById('duration_hours-m-picker').value}m`);}
-                for (const header in specialInputTypes) { if (specialInputTypes[header] === 'date' && formData.has(header) && formData.get(header)) { formData.set(header, formatForSheet(formData.get(header))); } }
-                formData.append('action', 'create');
+                // Silently update master data in the background
+                allRecords = result.rows;
+                uniqueValues = result.uniqueValues;
+                sortRecords(allRecords);
+                populateFilters(allRecords);
                 
-                try {
-                    const response = await fetch(WEB_APP_URL, { method: 'POST', body: formData, mode: 'cors' });
-                    if (!response.ok) throw new Error(`Server error (${response.status})`);
-                    const result = await response.json();
-                    if (result.status !== 'SUCCESS') throw new Error(result.message);
-                    
-                    processDataPayload(result);
-                    dataModal.style.display = 'none';
+                // Update record count
+                const totalRecords = allRecords.length;
+                const displayedRecords = tableBody.getElementsByTagName('tr').length;
+                recordCountDisplay.textContent = (displayedRecords === totalRecords && searchFilter.value === '' && yearFilter.value === 'all' && dateFilter.value === 'all') 
+                    ? `Displaying all ${totalRecords} records.` 
+                    : `Displaying ${displayedRecords} of ${totalRecords} records.`;
 
-                } catch (error) {
-                    handleFetchError(error, 'Save');
-                } finally {
-                    saveBtn.disabled = false;
-                    saveBtn.innerHTML = originalButtonContent;
-                }
+
+            } catch (error) {
+                handleFetchError(error, 'Save');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = originalButtonContent;
             }
         }
+        
+        async function animateRowUpdate(record, action) {
+            let targetRow;
+
+            if (action === 'update') {
+                targetRow = tableBody.querySelector(`tr[data-row-index='${record.rowIndex}']`);
+                if (!targetRow) {
+                    console.error("Could not find row to update. It might be filtered out.");
+                    applyFilter(); // Refresh table to show the updated row if it's now visible
+                    targetRow = tableBody.querySelector(`tr[data-row-index='${record.rowIndex}']`);
+                    if(targetRow) targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    return;
+                }
+            } else { // create
+                targetRow = document.createElement('tr');
+                targetRow.dataset.rowIndex = record.rowIndex;
+                // Add placeholder cells
+                sheetHeaders.forEach(() => targetRow.insertCell());
+                targetRow.insertCell(); // For actions cell
+                tableBody.prepend(targetRow);
+            }
+
+            targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            targetRow.classList.add('row-updating');
+
+            const cells = Array.from(targetRow.children).slice(0, -1); // Exclude action cell
+
+            for (let i = 0; i < sheetHeaders.length; i++) {
+                const header = sheetHeaders[i];
+                const cell = cells[i];
+                cell.innerHTML = '<div class="cell-loader"></div>';
+                await new Promise(res => setTimeout(res, 100)); // Short delay for effect
+                cell.innerHTML = escapeHtml(record[header]);
+            }
+
+            // Repopulate the actions cell
+            const actionsCell = targetRow.querySelector('td:last-child');
+            actionsCell.className = 'actions';
+            populateActions(actionsCell, record);
+
+            // Determine correct row color without full re-render
+            const nextRow = targetRow.nextElementSibling;
+            let newColorClass = 'color-group-1';
+            if(nextRow){
+                 const nextRowDate = nextRow.querySelector(`td:nth-child(${sheetHeaders.indexOf(dateMonthColumn) + 1})`).textContent;
+                 if(record[dateMonthColumn] === nextRowDate){
+                    newColorClass = nextRow.classList.contains('color-group-1') ? 'color-group-1' : 'color-group-2';
+                 } else {
+                    newColorClass = nextRow.classList.contains('color-group-1') ? 'color-group-2' : 'color-group-1';
+                 }
+            }
+            targetRow.classList.remove('color-group-1', 'color-group-2');
+            targetRow.classList.add(newColorClass);
+
+
+            await new Promise(res => setTimeout(res, 400)); // Let highlight persist
+            targetRow.classList.remove('row-updating');
+        }
+
 
         function showDeleteConfirm(rowIndex) {
             confirmTitle.textContent = 'Confirm Deletion';
@@ -825,4 +825,3 @@
     </script>
 </body>
 </html>
-
